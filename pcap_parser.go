@@ -1,10 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"math"
 	"time"
+	"strings"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
@@ -15,14 +15,35 @@ type PacketTime struct {
 	time   time.Duration
 }
 
-func main() {
+func getInterface(allowLoopback bool) string {
+
+	// Find all the interfaces
+	ifaces, err := pcap.FindAllDevs()
+	if err != nil {
+		log.Fatal(err)
+		return ""
+	}
+	
+	// Loop through them until a non-loopback interface is found, then return it
+	for _, iface := range ifaces {
+		if (allowLoopback || (iface.Name != "lo" && !strings.Contains(iface.Name, "Loopback"))) {
+			return iface.Name
+		}
+	}
+	
+	// Somehow no interfaces were found, so return empty
+	log.Fatal("No non-loopback interfaces exist!")
+	return ""
+}
+
+func replayPCAP(filepath string) {
 
 	// Set up array for storing packets, as this with let the packets be stored in memory which will make outputting faster (about 0.1 seconds in test.pcap)
 	packetTimes := []PacketTime{}
 
 	// Setup Input
 	// https://pkg.go.dev/github.com/google/gopacket/pcap#OpenOffline
-	pcapFileHandle, pcapFileErr := pcap.OpenOffline("test.pcap")
+	pcapFileHandle, pcapFileErr := pcap.OpenOffline(filepath)
 	if pcapFileErr != nil {
 		log.Fatal(pcapFileErr)
 		return
@@ -50,7 +71,7 @@ func main() {
 
 	// Setup Output
 	// https://pkg.go.dev/github.com/google/gopacket/pcap#OpenLive
-	pcapOutputHandle, pcapOutputErr := pcap.OpenLive("lo", math.MaxInt32, false, pcap.BlockForever)
+	pcapOutputHandle, pcapOutputErr := pcap.OpenLive(getInterface(false), math.MaxInt32, false, pcap.BlockForever)
 	if pcapOutputErr != nil {
 		log.Fatal(pcapOutputErr)
 		return
@@ -64,9 +85,13 @@ func main() {
 
 		// Write packet data to pcapOutputHandle
 		if pcapOutputErr = pcapOutputHandle.WritePacketData(packetTime.packet.Data()); pcapOutputErr != nil {
-			fmt.Printf("[-] Error while sending: %s\n", pcapOutputErr.Error())
+			log.Fatal("[-] Error while sending: %s\n", pcapOutputErr.Error())
 			return
 		}
 	}
 	pcapOutputHandle.Close()
+}
+
+func main() {
+	replayPCAP("icmp.pcap")
 }
